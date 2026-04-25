@@ -1,0 +1,23 @@
+# 영상 파일 (용량 큼)
+*.mov
+*.mp4
+*.avi
+
+# 결과 파일 (재생성 가능)
+*_result.*
+
+# YOLO 모델 가중치
+*.pt
+*.pth
+runs/
+
+# 라벨링용 추출 프레임
+frames_for_labeling/
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# 기타
+.DS_Store
