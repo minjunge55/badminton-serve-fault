@@ -7,21 +7,20 @@ import cv2
 import os
 from pathlib import Path
 
-VIDEO_DIR = Path(__file__).parent.parent  # 서브폴트개발 폴더
+VIDEO_DIR = Path(__file__).parent  # 영상 파일과 같은 폴더
 OUTPUT_DIR = Path(__file__).parent / "frames_for_labeling"
 VIDEOS = [
-    # 기존 영상
     "민지서브폴트.mov",
-    "인서서브폴트.mov",
-    "형우서브폴트.mov",
-    # 레이블된 폴트 영상 (YOLO 학습용)
-    "정상.mp4",
-    "허리선넘기.mp4",
-    "선밟기.mp4",
-    "쉐이크.mp4",
-    "풋무브.mp4",
-    "오버헤드.mp4",
-    "빽지체.mp4",
+    # 나중에 추가할 영상들:
+    # "형우서브폴트.mov",
+    # "인서서브폴트.mov",
+    # "정상.mp4",
+    # "허리선넘기.mp4",
+    # "선밟기.mp4",
+    # "쉐이크.mp4",
+    # "풋무브.mp4",
+    # "오버헤드.mp4",
+    # "빽지체.mp4",
 ]
 EVERY_N_FRAMES = 5  # 5프레임마다 1장 추출 (60fps → 초당 12장)
 
@@ -47,8 +46,11 @@ def extract(video_path: Path, out_dir: Path):
             break
         if idx % EVERY_N_FRAMES == 0:
             fname = out_dir / f"{stem}_{idx:05d}.jpg"
-            cv2.imwrite(str(fname), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            saved += 1
+            # cv2.imwrite는 한글 경로에서 실패 → imencode + 직접 쓰기
+            success, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if success:
+                fname.write_bytes(buf.tobytes())
+                saved += 1
         idx += 1
 
     cap.release()
