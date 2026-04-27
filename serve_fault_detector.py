@@ -3,7 +3,7 @@
 주요 변경:
 - 샤프트 폴트: 라켓헤드 없으면 감지 안 함 (팔꿈치 근사 제거 — 부정확)
 - 결과 표시: 서브 완료(임팩트) 후 result_display_sec 초 동안 크게 표시
-- 그 외 프레임: 기준선(허리/1.10m/서비스라인)만 표시
+- 그 외 프레임: 기준선(허리/1.15m/서비스라인)만 표시
 """
 
 import cv2
@@ -95,7 +95,7 @@ def _height_thresh_from_kps(kps, player_height_m):
     if body_px <= 50:
         return None
     px_per_m = body_px / (player_height_m * 0.90)
-    return metrics["ankle_y"] - (1.10 * px_per_m)
+    return metrics["ankle_y"] - (1.15 * px_per_m)
 
 
 # ── 신체 기준선 1회 보정 ───────────────────────────────────
@@ -370,7 +370,7 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
                   shake_reversals=2, foot_move_px=80):
     """
     판별 시점 분리:
-    - 서브 시작(serve_start_frame): 선밟기, 1.10m 높이
+    - 서브 시작(serve_start_frame): 선밟기, 1.15m 높이
     - 서브 시작 ~ 임팩트 전체: 발 이동, 쉐이크
     - 임팩트(impact_frame): 웨이스트, 샤프트
     """
@@ -391,7 +391,7 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
         if fault["waist_margin"] is not None:
             max_waist_m = max(max_waist_m, fault["waist_margin"])
 
-    # ── 서브 시작 시점 판별: 선밟기, 1.10m 높이 ──────────
+    # ── 서브 시작 시점 판별: 선밟기, 1.15m 높이 ──────────
     line_fault   = False
     height_fault = False
 
@@ -406,7 +406,7 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
                 if ankle and ankle[1] >= service_line_y:
                     line_fault = True
 
-        # 1.10m 높이: 서브 시작 시 셔틀콕 높이 (커스텀 YOLO 있을 때만)
+        # 1.15m 높이: 서브 시작 시 셔틀콕 높이 (커스텀 YOLO 있을 때만)
         if det_data and serve_start_frame in det_data:
             shuttle_start = det_data[serve_start_frame][0]
             h_thresh = (calib or {}).get("height_thresh_y")
@@ -460,7 +460,7 @@ def draw_reference_lines(frame, calib, service_line_y=None):
     if calib.get("height_thresh_y"):
         ht = int(calib["height_thresh_y"])
         cv2.line(frame, (0, ht), (w, ht), (0, 140, 255), 2)
-        cv2.putText(frame, "1.10m (9.1.6.2)", (8, ht - 6),
+        cv2.putText(frame, "1.15m (9.1.6.2)", (8, ht - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 140, 255), 1)
 
     if service_line_y is not None:
@@ -477,7 +477,7 @@ def draw_serve_result(frame, serve_result, shuttle=None, racket=None):
 
     tags = []
     if serve_result.get("waist_fault"):     tags.append("WAIST")
-    if serve_result.get("height_fault"):    tags.append("HEIGHT 1.10m")
+    if serve_result.get("height_fault"):    tags.append("HEIGHT 1.15m")
     if serve_result.get("shaft_fault"):     tags.append("SHAFT")
     if serve_result.get("shake_fault"):     tags.append("SHAKE")
     if serve_result.get("foot_move_fault"): tags.append("FOOT MOVE")
@@ -572,10 +572,10 @@ def analyze_video(input_path, output_path=None, side="right",
             print(f"  {frame_idx}/{total} ({frame_idx/total*100:.0f}%)")
     cap.release()
 
-    print(f"\n[보정] 처음 {calibration_frames}프레임으로 허리선·1.10m선 고정 중...")
+    print(f"\n[보정] 처음 {calibration_frames}프레임으로 허리선·1.15m선 고정 중...")
     calib = calibrate_body(frames_data, calibration_frames, player_height_m)
     print(f"  허리선:  {calib['waist_y']:.0f}px" if calib['waist_y'] else "  허리선: 감지 실패")
-    print(f"  1.10m선: {calib['height_thresh_y']:.0f}px" if calib['height_thresh_y'] else "  1.10m선: 감지 실패")
+    print(f"  1.15m선: {calib['height_thresh_y']:.0f}px" if calib['height_thresh_y'] else "  1.15m선: 감지 실패")
     if service_line_y:
         print(f"  서비스라인: {service_line_y}px")
 
@@ -677,7 +677,7 @@ def analyze_video(input_path, output_path=None, side="right",
     for i, s in enumerate(serves):
         tags = []
         if s["waist_fault"]:       tags.append("웨이스트")
-        if s["height_fault"]:      tags.append("높이1.10m")
+        if s["height_fault"]:      tags.append("높이1.15m")
         if s["shaft_fault"]:       tags.append("샤프트")
         if s["shake_fault"]:       tags.append("쉐이크")
         if s["foot_move_fault"]:   tags.append("발이동")

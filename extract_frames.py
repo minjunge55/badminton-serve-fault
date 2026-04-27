@@ -7,20 +7,25 @@ import cv2
 import os
 from pathlib import Path
 
-VIDEO_DIR = Path(__file__).parent  # 영상 파일과 같은 폴더
+VIDEO_DIR = Path(__file__).parent  # badminton-serve-fault 폴더
+VIDEO_DIR_PARENT = Path(__file__).parent.parent  # 서브폴트개발 폴더
 OUTPUT_DIR = Path(__file__).parent / "frames_for_labeling"
+
+# (파일명, 폴더) 형태로 지정
 VIDEOS = [
-    "민지서브폴트.mov",
-    # 나중에 추가할 영상들:
-    # "형우서브폴트.mov",
-    # "인서서브폴트.mov",
-    # "정상.mp4",
-    # "허리선넘기.mp4",
-    # "선밟기.mp4",
-    # "쉐이크.mp4",
-    # "풋무브.mp4",
-    # "오버헤드.mp4",
-    # "빽지체.mp4",
+    ("민지서브폴트.mov",  VIDEO_DIR),
+    ("형우서브폴트.mov",  VIDEO_DIR),
+    ("인서서브폴트.mov",  VIDEO_DIR),
+    ("정상.mp4",          VIDEO_DIR_PARENT),
+    ("허리선넘기.mp4",    VIDEO_DIR_PARENT),
+    ("쉐이크.mp4",        VIDEO_DIR_PARENT),
+    ("오버헤드.mp4",      VIDEO_DIR_PARENT),
+    ("빽지체.mp4",        VIDEO_DIR_PARENT),
+    ("풋무브.mp4",        VIDEO_DIR_PARENT),
+    ("선밟기.mp4",        VIDEO_DIR_PARENT),
+    ("쉐이크폴트.MTS",   VIDEO_DIR_PARENT),
+    ("앞45도.MTS",        VIDEO_DIR_PARENT),  # 앞 45도 각도 영상
+    ("뒤45도.MTS",        VIDEO_DIR_PARENT),  # 뒤 45도 각도 영상
 ]
 EVERY_N_FRAMES = 5  # 5프레임마다 1장 추출 (60fps → 초당 12장)
 
@@ -62,8 +67,8 @@ def main():
     print(f"출력 폴더: {OUTPUT_DIR}\n")
 
     total_saved = 0
-    for name in VIDEOS:
-        vpath = VIDEO_DIR / name
+    for name, folder in VIDEOS:
+        vpath = folder / name
         if not vpath.exists():
             print(f"[스킵] 파일 없음: {vpath}")
             continue
