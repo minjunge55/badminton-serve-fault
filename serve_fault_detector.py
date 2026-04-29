@@ -447,27 +447,69 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
     }
 
 
-# ── 기준선 드로잉 (항상 표시) ─────────────────────────────
-def draw_reference_lines(frame, calib, service_line_y=None):
+# ── 기준선 드로잉 (1.15m 고정선만) ───────────────────────
+def draw_reference_lines(frame, calib, kps=None, service_line_y=None):
+    """
+    허리선: 매 프레임 포즈에서 동적 계산 (고정 X)
+    1.15m선: 고정 (코트 기준)
+    """
     h, w = frame.shape[:2]
 
-    if calib.get("waist_y"):
-        wy = int(calib["waist_y"])
-        cv2.line(frame, (0, wy), (w, wy), (0, 220, 220), 2)
-        cv2.putText(frame, "WAIST (9.1.6)", (8, wy - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 220), 1)
+    # 허리선: 현재 프레임 포즈에서 동적 계산
+    if kps is not None:
+        m = body_metrics(kps)
+        if m.get("waist_y"):
+            wy = int(m["waist_y"])
+            cv2.line(frame, (0, wy), (w, wy), (0, 220, 220), 2)
+            cv2.putText(frame, "WAIST", (8, wy - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 220), 1)
 
+    # 1.15m선: 고정
     if calib.get("height_thresh_y"):
         ht = int(calib["height_thresh_y"])
         cv2.line(frame, (0, ht), (w, ht), (0, 140, 255), 2)
-        cv2.putText(frame, "1.15m (9.1.6.2)", (8, ht - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 140, 255), 1)
+        cv2.putText(frame, "1.15m", (8, ht - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 140, 255), 1)
 
     if service_line_y is not None:
         sl = int(service_line_y)
-        cv2.line(frame, (0, sl), (w, sl), (0, 0, 220), 2)
-        cv2.putText(frame, "SERVICE LINE (9.1.4)", (8, sl - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 220), 1)
+        cv2.line(frame, (0, sl), (w, sl), (0, 0, 220), 1)
+
+
+# ── 상단 HUD 패널 (실시간 폴트 카테고리 상태) ─────────────
+def draw_fault_hud(frame, fault, serve_result=None):
+    """
+    상단에 폴트 카테고리별 상태 표시.
+    서브 결과가 있으면 해당 결과 기준, 없으면 현재 프레임 기준.
+    """
+    h, w = frame.shape[:2]
+    panel_h = 40
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (w, panel_h), (20, 20, 20), -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+
+    # 표시할 카테고리
+    src = serve_result if serve_result else fault
+    categories = [
+        ("WAIST",   src.get("waist_fault",     False)),
+        ("HEIGHT",  src.get("height_fault",    False)),
+        ("SHAFT",   src.get("shaft_fault",     False)),
+        ("SHAKE",   src.get("shake_fault",     False)),
+        ("FOOT",    src.get("foot_move_fault", False)),
+        ("LINE",    src.get("foot_line_fault", False)),
+        ("MISS",    src.get("miss_fault",      False)),
+    ]
+
+    x = 10
+    for label, is_fault in categories:
+        color = (0, 60, 255) if is_fault else (60, 200, 60)
+        icon  = "X" if is_fault else "O"
+        text  = f"{label}:{icon}"
+        cv2.putText(frame, text, (x, 27),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2)
+        (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
+        x += tw + 18
 
 
 # ── 서브 결과 표시 (임팩트 후 N초) ───────────────────────
@@ -632,12 +674,29 @@ def analyze_video(input_path, output_path=None, side="right",
             kps     = frames_data[frame_idx]
             shuttle = det_data[frame_idx][0] if (det_model and frame_idx in det_data) else None
             racket  = det_data[frame_idx][1] if (det_model and frame_idx in det_data) else None
+            fault   = detect_faults(kps, side, shuttle, racket, calib)
 
             draw_skeleton(frame, kps)
-            draw_reference_lines(frame, calib, service_line_y)
+            # 허리선 동적(kps 전달), 1.15m 고정
+            draw_reference_lines(frame, calib, kps=kps, service_line_y=service_line_y)
 
+            # 셔틀콕 / 라켓헤드 표시
+            if shuttle:
+                sx, sy = int(shuttle[0]), int(shuttle[1])
+                cv2.circle(frame, (sx, sy), 12, (0, 255, 0), 2)
+            if racket:
+                rx1,ry1,rx2,ry2 = int(racket[3]),int(racket[4]),int(racket[5]),int(racket[6])
+                cv2.rectangle(frame, (rx1,ry1),(rx2,ry2),(0,165,255),2)
+
+            # 상단 HUD
+            draw_fault_hud(frame, fault,
+                           serve_result=active_result[0] if active_result else None)
+
+            # 서브 결과 (임팩트 후 N초)
             if active_result:
                 draw_serve_result(frame, active_result[0], shuttle, racket)
+        else:
+            draw_fault_hud(frame, {})
 
         draw_timestamp(frame, frame_idx, fps)
         out.write(frame)
