@@ -476,77 +476,88 @@ def draw_reference_lines(frame, calib, kps=None, service_line_y=None):
         cv2.line(frame, (0, sl), (w, sl), (0, 0, 220), 1)
 
 
-# ── 상단 HUD 패널 (실시간 폴트 카테고리 상태) ─────────────
+# ── 우측 HUD 패널 (세로, 한글, 큰 글씨) ──────────────────
 def draw_fault_hud(frame, fault, serve_result=None):
     """
-    상단에 폴트 카테고리별 상태 표시.
-    서브 결과가 있으면 해당 결과 기준, 없으면 현재 프레임 기준.
+    우측에 폴트 카테고리별 상태 세로 표시 (선수 자세 안 가림).
     """
     h, w = frame.shape[:2]
-    panel_h = 40
 
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, panel_h), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-
-    # 표시할 카테고리
     src = serve_result if serve_result else fault
     categories = [
-        ("WAIST",   src.get("waist_fault",     False)),
-        ("HEIGHT",  src.get("height_fault",    False)),
-        ("SHAFT",   src.get("shaft_fault",     False)),
-        ("SHAKE",   src.get("shake_fault",     False)),
-        ("FOOT",    src.get("foot_move_fault", False)),
-        ("LINE",    src.get("foot_line_fault", False)),
-        ("MISS",    src.get("miss_fault",      False)),
+        ("허리선",   src.get("waist_fault",     False)),
+        ("높이1.15m", src.get("height_fault",   False)),
+        ("샤프트",   src.get("shaft_fault",     False)),
+        ("쉐이크",   src.get("shake_fault",     False)),
+        ("발이동",   src.get("foot_move_fault", False)),
+        ("선밟기",   src.get("foot_line_fault", False)),
+        ("헛치기",   src.get("miss_fault",      False)),
     ]
 
-    x = 10
-    for label, is_fault in categories:
-        color = (0, 60, 255) if is_fault else (60, 200, 60)
+    font      = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.65
+    thickness  = 2
+    padding    = 10
+    line_h     = 34
+
+    # 패널 너비 계산
+    max_tw = max(cv2.getTextSize(f"{l}", font, font_scale, thickness)[0][0]
+                 for l, _ in categories) + 50
+    panel_w = max_tw + padding * 2
+    panel_h = line_h * len(categories) + padding
+
+    # 우측 상단 반투명 패널
+    px1, py1 = w - panel_w - 5, 5
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (px1, py1), (w - 5, py1 + panel_h), (20, 20, 20), -1)
+    cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
+
+    for i, (label, is_fault) in enumerate(categories):
+        color = (0, 50, 255) if is_fault else (50, 210, 50)
         icon  = "X" if is_fault else "O"
-        text  = f"{label}:{icon}"
-        cv2.putText(frame, text, (x, 27),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2)
-        (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
-        x += tw + 18
+        y     = py1 + padding + (i + 1) * line_h - 8
+        cv2.putText(frame, f"{icon} {label}", (px1 + padding, y),
+                    font, font_scale, color, thickness)
 
 
-# ── 서브 결과 표시 (임팩트 후 N초) ───────────────────────
+# ── 서브 결과 표시 (우측 하단, 선수 안 가림) ─────────────
 def draw_serve_result(frame, serve_result, shuttle=None, racket=None):
-    """임팩트 후 serve_result를 화면 중앙에 크게 표시."""
     h, w = frame.shape[:2]
 
-    tags = []
-    if serve_result.get("waist_fault"):     tags.append("WAIST")
-    if serve_result.get("height_fault"):    tags.append("HEIGHT 1.15m")
-    if serve_result.get("shaft_fault"):     tags.append("SHAFT")
-    if serve_result.get("shake_fault"):     tags.append("SHAKE")
-    if serve_result.get("foot_move_fault"): tags.append("FOOT MOVE")
-    if serve_result.get("foot_line_fault"): tags.append("FOOT LINE")
-    if serve_result.get("miss_fault"):      tags.append("MISS")
+    tags_kr = []
+    if serve_result.get("waist_fault"):     tags_kr.append("허리선")
+    if serve_result.get("height_fault"):    tags_kr.append("높이1.15m")
+    if serve_result.get("shaft_fault"):     tags_kr.append("샤프트")
+    if serve_result.get("shake_fault"):     tags_kr.append("쉐이크")
+    if serve_result.get("foot_move_fault"): tags_kr.append("발이동")
+    if serve_result.get("foot_line_fault"): tags_kr.append("선밟기")
+    if serve_result.get("miss_fault"):      tags_kr.append("헛치기")
 
-    is_fault = bool(tags)
-    bg_color   = (0, 0, 180)   if is_fault else (0, 140, 0)
-    label_main = ("FAULT"      if is_fault else "OK")
-    label_sub  = " | ".join(tags) if tags else "LEGAL SERVE"
+    is_fault   = bool(tags_kr)
+    bg_color   = (0, 0, 160)  if is_fault else (0, 120, 0)
+    label_main = "FAULT"      if is_fault else "OK"
+    label_sub  = " / ".join(tags_kr) if tags_kr else "정상 서브"
 
-    # 반투명 배경 박스
-    box_y1, box_y2 = h // 2 - 70, h // 2 + 70
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, box_y1), (w, box_y2), bg_color, -1)
-    cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-
-    # 메인 텍스트
     font = cv2.FONT_HERSHEY_SIMPLEX
-    (tw, _), _ = cv2.getTextSize(label_main, font, 2.0, 4)
-    cv2.putText(frame, label_main, ((w - tw) // 2, h // 2 - 5),
-                font, 2.0, (255, 255, 255), 4)
 
-    # 서브 텍스트 (폴트 종류)
-    (tw2, _), _ = cv2.getTextSize(label_sub, font, 0.75, 2)
-    cv2.putText(frame, label_sub, ((w - tw2) // 2, h // 2 + 50),
-                font, 0.75, (220, 220, 220), 2)
+    # 우측 하단에 결과 박스
+    (mw, mh), _ = cv2.getTextSize(label_main, font, 2.2, 4)
+    (sw, sh), _ = cv2.getTextSize(label_sub,  font, 0.7, 2)
+    box_w = max(mw, sw) + 30
+    box_h = mh + sh + 30
+    bx1 = w - box_w - 10
+    by1 = h - box_h - 10
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (bx1, by1), (w - 10, h - 10), bg_color, -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+
+    cv2.putText(frame, label_main,
+                (bx1 + 15, by1 + mh + 8),
+                font, 2.2, (255, 255, 255), 4)
+    cv2.putText(frame, label_sub,
+                (bx1 + 15, by1 + mh + sh + 20),
+                font, 0.7, (220, 220, 220), 2)
 
     # 셔틀콕 / 라켓헤드 검출 표시
     if shuttle:
