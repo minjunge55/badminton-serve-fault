@@ -12,6 +12,26 @@ import argparse
 import numpy as np
 from pathlib import Path
 from ultralytics import YOLO
+from PIL import ImageFont, ImageDraw, Image
+
+# 한글 폰트 로드 (Windows 맑은고딕)
+_KO_FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
+_ko_fonts = {}
+
+def _ko_font(size):
+    if size not in _ko_fonts:
+        try:
+            _ko_fonts[size] = ImageFont.truetype(_KO_FONT_PATH, size)
+        except:
+            _ko_fonts[size] = ImageFont.load_default()
+    return _ko_fonts[size]
+
+def put_ko(frame, text, pos, size=24, color=(255, 255, 255)):
+    """OpenCV 프레임에 한글 텍스트 렌더링"""
+    img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    draw    = ImageDraw.Draw(img_pil)
+    draw.text(pos, text, font=_ko_font(size), fill=(color[2], color[1], color[0]))
+    frame[:] = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 # ── COCO 17 keypoint 인덱스 ────────────────────────────────
 KP = {
@@ -515,9 +535,8 @@ def draw_fault_hud(frame, fault, serve_result=None):
     for i, (label, is_fault) in enumerate(categories):
         color = (0, 50, 255) if is_fault else (50, 210, 50)
         icon  = "X" if is_fault else "O"
-        y     = py1 + padding + (i + 1) * line_h - 8
-        cv2.putText(frame, f"{icon} {label}", (px1 + padding, y),
-                    font, font_scale, color, thickness)
+        y     = py1 + padding + i * line_h + 4
+        put_ko(frame, f"{icon} {label}", (px1 + padding, y), size=22, color=color)
 
 
 # ── 서브 결과 표시 (우측 하단, 선수 안 가림) ─────────────
@@ -555,9 +574,9 @@ def draw_serve_result(frame, serve_result, shuttle=None, racket=None):
     cv2.putText(frame, label_main,
                 (bx1 + 15, by1 + mh + 8),
                 font, 2.2, (255, 255, 255), 4)
-    cv2.putText(frame, label_sub,
-                (bx1 + 15, by1 + mh + sh + 20),
-                font, 0.7, (220, 220, 220), 2)
+    put_ko(frame, label_sub,
+           (bx1 + 15, by1 + mh + 14),
+           size=22, color=(220, 220, 220))
 
     # 셔틀콕 / 라켓헤드 검출 표시
     if shuttle:
