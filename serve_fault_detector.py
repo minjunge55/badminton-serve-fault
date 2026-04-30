@@ -373,11 +373,22 @@ def find_impact_frames(wrist_positions, fps, min_gap_sec=2.0):
 
 # ── 헛치기 감지 (9.1.10) ──────────────────────────────────
 def detect_miss(shuttle_positions, impact_frame, post_window=15, min_displacement=30):
+    """
+    임팩트 전후로 셔틀콕이 충분히 감지돼야 판별 (감지 부족 시 None 반환).
+    - 임팩트 전 3프레임 내 셔틀콕 감지 필수 (임팩트 시점 확인)
+    - 임팩트 후 5프레임 이상 추적돼야 판별
+    """
+    # 임팩트 전 3프레임 내 셔틀콕 감지 확인 (감지 신뢰도 검증)
+    pre_frames = [f for f in range(max(0, impact_frame - 3), impact_frame + 1)
+                  if f in shuttle_positions and shuttle_positions[f] is not None]
+    if len(pre_frames) < 2:
+        return None  # 임팩트 주변에서 셔틀콕 못 잡음 → 판별 불가
+
     post_frames = sorted([
         f for f in range(impact_frame, impact_frame + post_window + 1)
         if f in shuttle_positions and shuttle_positions[f] is not None
     ])
-    if len(post_frames) < 3:
+    if len(post_frames) < 5:   # 5프레임 이상 추적돼야 판별
         return None
     p0, p1 = shuttle_positions[post_frames[0]], shuttle_positions[post_frames[-1]]
     return ((p1[0]-p0[0])**2 + (p1[1]-p0[1])**2)**0.5 < min_displacement
