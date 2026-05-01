@@ -194,8 +194,9 @@ def detect_faults(kps, side="right", shuttle=None, racket=None, calib=None):
     }
 
     # ── 웨이스트 폴트 (9.1.6) ─────────────────────────────
-    # 셔틀콕 위치 우선, 없으면 손목 근사
-    impact_y = shuttle[1] if shuttle else (wrist[1] if wrist else None)
+    # 셔틀콕 전체가 허리 아래에 있어야 정상 → 상단(y1)으로 체크
+    # shuttle[4]=y1(상단), shuttle[1]=cy(중심) — y1이 waist 위에 있으면 폴트
+    impact_y = shuttle[4] if shuttle else (wrist[1] if wrist else None)
     if impact_y is not None and waist_y_ref:
         diff = waist_y_ref - impact_y
         result["waist_margin"] = round(diff, 1)
@@ -405,22 +406,32 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
     - 서브 시작 ~ 임팩트 전체: 발 이동, 쉐이크
     - 임팩트(impact_frame): 웨이스트, 샤프트
     """
-    # ── 임팩트 시점 판별: 웨이스트, 샤프트 ────────────────
+    # ── 웨이스트: 임팩트 전후 3프레임 / 샤프트: 서브시작~임팩트 전체 ──
     waist_faults = []; shaft_faults = []
     max_waist_m  = -9999
 
-    # 임팩트 전후 3프레임 윈도우 (임팩트 순간 집중)
-    impact_window = range(max(serve_start_frame, impact_frame - 3), impact_frame + 1)
-    for f in impact_window:
+    # 웨이스트 — 임팩트 순간 집중 (±3프레임)
+    waist_window = range(max(serve_start_frame, impact_frame - 3), impact_frame + 1)
+    # 샤프트 — 서브 시작~임팩트 전체 구간 (BWF 9.1.7)
+    shaft_window = range(serve_start_frame, impact_frame + 1)
+
+    for f in waist_window:
         if f not in frames_data:
             continue
         shuttle = det_data[f][0] if (det_data and f in det_data) else None
         racket  = det_data[f][1] if (det_data and f in det_data) else None
         fault   = detect_faults(frames_data[f], side, shuttle, racket, calib)
         if fault["waist_fault"]:  waist_faults.append(f)
-        if fault["shaft_fault"]:  shaft_faults.append(f)
         if fault["waist_margin"] is not None:
             max_waist_m = max(max_waist_m, fault["waist_margin"])
+
+    for f in shaft_window:
+        if f not in frames_data:
+            continue
+        shuttle = det_data[f][0] if (det_data and f in det_data) else None
+        racket  = det_data[f][1] if (det_data and f in det_data) else None
+        fault   = detect_faults(frames_data[f], side, shuttle, racket, calib)
+        if fault["shaft_fault"]:  shaft_faults.append(f)
 
     # ── 서브 시작 시점 판별: 선밟기, 1.15m 높이 ──────────
     line_fault   = False
@@ -459,7 +470,7 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
     # ── 헛치기 ────────────────────────────────────────────
     miss = detect_miss(shuttle_positions, impact_frame) if shuttle_positions else None
 
-    n = max(len(list(impact_window)), 1)
+    n = max(len(list(waist_window)), 1)
     return {
         "impact_frame":         impact_frame,
         "serve_start_frame":    serve_start_frame,
