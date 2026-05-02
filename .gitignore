@@ -9,6 +9,7 @@
 # YOLO 모델 가중치
 *.pt
 *.pth
+!best_v9.pt
 runs/
 
 # 라벨링용 추출 프레임
