@@ -631,7 +631,7 @@ def analyze_video(input_path, output_path=None, side="right",
     if not input_path.exists():
         raise FileNotFoundError(f"파일 없음: {input_path}")
     if output_path is None:
-        output_path = str(input_path.parent / f"{input_path.stem}_result{input_path.suffix}")
+        output_path = str(input_path.parent / f"{input_path.stem}_result.mp4")
 
     pose_model = YOLO("yolov8n-pose.pt")
     det_model  = YOLO(det_model_path) if det_model_path else None
