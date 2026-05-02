@@ -135,28 +135,28 @@ class ServeDetector:
         self.calib_target   = 90
 
     def update_calib(self, kps, frame_idx):
-        if self.calib_done or frame_idx > self.calib_target:
-            if not self.calib_done and self.calib_frames:
-                self._finalize_calib()
-            return
         m = body_metrics(kps)
-        if m["valid"]:
-            self.calib_frames.append(m)
-        if frame_idx == self.calib_target:
+        if not m["valid"]:
+            return
+        self.calib_frames.append(m)
+        # 5프레임 이상 쌓이면 즉시 보정, 이후 30프레임마다 갱신
+        if len(self.calib_frames) >= 5 and (
+            not self.calib_done or frame_idx % 30 == 0
+        ):
             self._finalize_calib()
 
     def _finalize_calib(self):
         if not self.calib_frames:
-            self.calib_done = True
             return
-        waist_ys  = [m["waist_y"]     for m in self.calib_frames]
-        body_hs   = [m["body_height"] for m in self.calib_frames]
-        ankle_ys  = [m["ankle_y"]     for m in self.calib_frames]
+        recent = list(self.calib_frames)[-30:]  # 최근 30프레임만 사용
+        waist_ys = [m["waist_y"]     for m in recent]
+        body_hs  = [m["body_height"] for m in recent]
+        ankle_ys = [m["ankle_y"]     for m in recent]
         self.calib = {
-            "waist_y":     float(np.median(waist_ys)),
-            "body_height": float(np.median(body_hs)),
-            "ankle_y_ref": float(np.median(ankle_ys)),
-            "height_thresh_y": None,  # 신장 없으면 None
+            "waist_y":         float(np.median(waist_ys)),
+            "body_height":     float(np.median(body_hs)),
+            "ankle_y_ref":     float(np.median(ankle_ys)),
+            "height_thresh_y": None,
         }
         self.calib_done = True
 
