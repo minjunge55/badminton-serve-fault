@@ -15,7 +15,7 @@ from ultralytics import YOLO
 from PIL import ImageFont, ImageDraw, Image
 
 # 한글 폰트 로드 (Windows 맑은고딕)
-_KO_FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
+_KO_FONT_PATH = "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
 _ko_fonts = {}
 
 def _ko_font(size):
@@ -149,7 +149,7 @@ def calibrate_body(frames_data, calibration_frames=90, player_height_m=1.70):
 
 
 # ── 커스텀 YOLO 검출 ───────────────────────────────────────
-def detect_objects(det_model, frame, conf_thr=0.3):
+def detect_objects(det_model, frame, conf_thr=0.15):
     results = det_model(frame, verbose=False)
     shuttle = racket = None
     if results[0].boxes is None:

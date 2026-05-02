@@ -363,14 +363,20 @@ def main():
 
     src = int(args.source) if args.source.isdigit() else args.source
 
+    import torch
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"디바이스: {device}")
+
     pose_model = YOLO("yolov8n-pose.pt")
+    pose_model.to(device)
     det_model  = YOLO(args.det_model) if Path(args.det_model).exists() else None
     if det_model:
+        det_model.to(device)
         print(f"YOLO 모델: {args.det_model}")
     else:
         print("경고: YOLO 모델 없음 — 셔틀콕/라켓 감지 불가")
 
-    cap = cv2.VideoCapture(src)
+    cap = cv2.VideoCapture(src, cv2.CAP_AVFOUNDATION) if isinstance(src, int) else cv2.VideoCapture(src)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     fps = cap.get(cv2.CAP_PROP_FPS) or 60.0

@@ -227,9 +227,48 @@ fps:  60fps 이상
 
 ---
 
+## 완료된 작업
+
+### 라이브 검출기 (2026-05-02) ✅
+- `live_detector.py` 개발 완료
+- Apple MPS(GPU) 가속 적용
+- 아이폰 Continuity Camera 무선 연결 지원
+- AVFoundation 백엔드로 카메라 안정적 인식
+
+### 카메라 연결 방법
+```bash
+# 아이폰 카메라 (무선 자동 연결 — USB 불필요)
+python live_detector.py --source 0
+
+# 영상 파일 테스트
+python live_detector.py --source 영상경로.mp4
+
+# 느릴 때 속도 최적화
+python live_detector.py --source 0 --skip 3 --infer_size 320
+```
+
+### 카메라 번호 확인
+```bash
+python -c "
+import cv2
+for i in range(3):
+    cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+    ret, frame = cap.read()
+    if ret:
+        print(i, frame.shape)
+    cap.release()
+"
+```
+
+### 촬영 세팅 (정확도 향상)
+- 삼각대에 아이폰/캠코더 고정
+- 선수 오른쪽 90도, 허리 높이
+- 캠코더(Sony FDR-AX40) → HDMI 캡처카드 필요
+
+---
+
 ## 다음 단계
-1. 쉐이크 폴트 영상 재촬영 (오른쪽 90도)
-2. 프레임 추출 → shuttlecock + racket_head 라벨링 (특히 공+라켓 근접 프레임)
-3. v3 데이터셋에 추가 → Colab 재학습
-4. 쉐이크 감지 로직 업데이트 (proximity 기반)
-5. 라이브 검출기 (`live_detector.py`) 개발
+1. v9 모델 학습 완료 → best.pt 다운로드 후 적용
+2. 삼각대 고정 후 실제 서브 폴트 판정 테스트
+3. 쉐이크 감지 로직 업데이트 (proximity 기반)
+4. 선밟기 폴트 — 서비스라인 감지 로직 추가
