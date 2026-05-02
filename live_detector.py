@@ -357,6 +357,8 @@ def main():
                         help="N프레임마다 1번 YOLO 처리 (기본 2, 빠르게 하려면 3)")
     parser.add_argument("--infer_size",  type=int,   default=640,
                         help="YOLO 추론 해상도 (기본 640, 느리면 320)")
+    parser.add_argument("--save",        action="store_true",
+                        help="결과 영상 저장 (live_result.mp4)")
     args = parser.parse_args()
 
     src = int(args.source) if args.source.isdigit() else args.source
@@ -373,11 +375,20 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
 
+    # 영상 저장 설정
+    writer = None
+    if args.save:
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter("live_result.mp4", fourcc, fps, (w, h))
+        print("영상 저장 중: live_result.mp4")
+
     detector      = ServeDetector(fps, args.side, shake_reversals=args.shake_rev)
     result_show   = None
     frame_idx     = 0
     result_frames = int(args.result_sec * fps)
-    kps = None; shuttle = None; racket = None  # 이전 프레임 값 유지
+    kps = None; shuttle = None; racket = None
 
     print(f"실행 중... (skip={args.skip}, infer_size={args.infer_size}) q 키로 종료")
 
@@ -447,6 +458,9 @@ def main():
         cv2.putText(frame, f"f={frame_idx}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (160,160,160), 1)
 
+        if writer:
+            writer.write(frame)
+
         cv2.imshow("배드민턴 서브 폴트 검출기 — q: 종료", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -454,6 +468,9 @@ def main():
         frame_idx += 1
 
     cap.release()
+    if writer:
+        writer.release()
+        print("저장 완료: live_result.mp4")
     cv2.destroyAllWindows()
 
 
