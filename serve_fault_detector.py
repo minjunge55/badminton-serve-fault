@@ -15,7 +15,7 @@ from ultralytics import YOLO
 from PIL import ImageFont, ImageDraw, Image
 
 # 한글 폰트 로드 (Windows 맑은고딕)
-_KO_FONT_PATH = "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
+_KO_FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
 _ko_fonts = {}
 
 def _ko_font(size):
@@ -149,7 +149,7 @@ def calibrate_body(frames_data, calibration_frames=90, player_height_m=1.70):
 
 
 # ── 커스텀 YOLO 검출 ───────────────────────────────────────
-def detect_objects(det_model, frame, conf_thr=0.15):
+def detect_objects(det_model, frame, conf_thr=0.3):
     results = det_model(frame, verbose=False)
     shuttle = racket = None
     if results[0].boxes is None:
@@ -194,9 +194,8 @@ def detect_faults(kps, side="right", shuttle=None, racket=None, calib=None):
     }
 
     # ── 웨이스트 폴트 (9.1.6) ─────────────────────────────
-    # 셔틀콕 전체가 허리 아래에 있어야 정상 → 상단(y1)으로 체크
-    # shuttle[4]=y1(상단), shuttle[1]=cy(중심) — y1이 waist 위에 있으면 폴트
-    impact_y = shuttle[4] if shuttle else (wrist[1] if wrist else None)
+    # 셔틀콕 위치 우선, 없으면 손목 근사
+    impact_y = shuttle[1] if shuttle else (wrist[1] if wrist else None)
     if impact_y is not None and waist_y_ref:
         diff = waist_y_ref - impact_y
         result["waist_margin"] = round(diff, 1)
@@ -332,19 +331,95 @@ def find_serve_start(wrist_positions, speeds_global, impact_frame, fps,
     if len(frames) < 4:
         return search_start
 
-    # 해당 구간 속도의 하위 25% = 정지 기준
+    # 해당 구간 속도의 하위 20% = 정지 기준 (더 엄격하게 → 더 이른 시작점)
     seg_speeds = [speeds_global[f] for f in frames]
-    low_thresh  = float(np.percentile(seg_speeds, 25))
+    low_thresh  = float(np.percentile(seg_speeds, 20))
 
-    # 임팩트에서 뒤로 가며 처음으로 '저속' 구간 진입 = 서브 시작 직전
+    # 임팩트에서 뒤로 가며 '저속 → 고속' 전환점을 찾음
+    # 즉, 정지 상태에서 움직이기 시작한 가장 이른 지점
+    low_start = None
     for f in reversed(frames):
         if speeds_global[f] <= low_thresh:
-            return f
+            low_start = f
+        elif low_start is not None:
+            return low_start  # 저속 구간 직전 프레임 = 서브 시작
 
-    return search_start
+    return low_start if low_start else search_start
 
 
-# ── 임팩트 자동 감지 ───────────────────────────────────────
+# ── 셔틀콕-라켓헤드 거리 계산 ────────────────────────────────
+def shuttle_racket_dist(shuttle, racket):
+    if shuttle and racket:
+        return ((shuttle[0]-racket[0])**2 + (shuttle[1]-racket[1])**2)**0.5
+    return None
+
+
+# ── proximity 기반 임팩트 감지 ────────────────────────────────
+def find_impact_frames_proximity(det_data, wrist_positions, fps, min_gap_sec=2.0,
+                                  proximity_threshold=200):
+    """
+    셔틀콕-라켓헤드 거리 최솟값 = 임팩트.
+    감지 데이터 부족 시 손목 속도 기반으로 폴백.
+    """
+    # 거리 계산
+    distances = {}
+    for f, (shuttle, racket) in det_data.items():
+        d = shuttle_racket_dist(shuttle, racket)
+        if d is not None and d < proximity_threshold:
+            distances[f] = d
+
+    min_gap = int(min_gap_sec * fps)
+
+    if len(distances) >= 10:
+        # proximity 기반: 로컬 최솟값 찾기
+        dist_frames = sorted(distances.keys())
+        impacts, last = [], -min_gap
+        for i in range(3, len(dist_frames) - 3):
+            f = dist_frames[i]
+            d = distances[f]
+            window = [distances[dist_frames[j]] for j in range(i-3, i+4) if j != i]
+            if window and d <= min(window) and (f - last) >= min_gap:
+                impacts.append(f)
+                last = f
+        if impacts:
+            _, speeds = find_impact_frames(wrist_positions, fps, min_gap_sec)
+            return impacts, speeds
+
+    # 폴백: 손목 속도 기반
+    return find_impact_frames(wrist_positions, fps, min_gap_sec)
+
+
+# ── proximity 기반 서브 시작 감지 ────────────────────────────
+def find_serve_start_proximity(det_data, wrist_positions, speeds_global, impact_frame,
+                                fps, max_lookback_sec=3.0, approach_threshold=250):
+    """
+    임팩트에서 뒤로 탐색:
+    셔틀콕-라켓헤드 거리가 임계값 초과하는 첫 프레임 = 서브 시작.
+    감지 부족 시 손목 속도 기반 폴백.
+    """
+    max_lookback = int(max_lookback_sec * fps)
+    search_start = max(0, impact_frame - max_lookback)
+
+    prox_frames = []
+    for f in range(search_start, impact_frame + 1):
+        if f in det_data:
+            shuttle, racket = det_data[f]
+            d = shuttle_racket_dist(shuttle, racket)
+            if d is not None:
+                prox_frames.append((f, d))
+
+    if len(prox_frames) >= 5:
+        # 임팩트에서 뒤로 가며 거리가 임계값 초과하는 첫 지점
+        for f, d in reversed(prox_frames):
+            if d > approach_threshold:
+                return f
+        return prox_frames[0][0]
+
+    # 폴백: 손목 속도 기반
+    return find_serve_start(wrist_positions, speeds_global, impact_frame, fps)
+
+
+# ── 임팩트 자동 감지 (손목 속도 기반 — 폴백용) ────────────────
 def find_impact_frames(wrist_positions, fps, min_gap_sec=2.0):
     """impacts 리스트와 전체 속도 딕셔너리를 함께 반환."""
     if len(wrist_positions) < 3:
@@ -406,32 +481,22 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
     - 서브 시작 ~ 임팩트 전체: 발 이동, 쉐이크
     - 임팩트(impact_frame): 웨이스트, 샤프트
     """
-    # ── 웨이스트: 임팩트 전후 3프레임 / 샤프트: 서브시작~임팩트 전체 ──
+    # ── 임팩트 시점 판별: 웨이스트, 샤프트 ────────────────
     waist_faults = []; shaft_faults = []
     max_waist_m  = -9999
 
-    # 웨이스트 — 임팩트 순간 집중 (±3프레임)
-    waist_window = range(max(serve_start_frame, impact_frame - 3), impact_frame + 1)
-    # 샤프트 — 서브 시작~임팩트 전체 구간 (BWF 9.1.7)
-    shaft_window = range(serve_start_frame, impact_frame + 1)
-
-    for f in waist_window:
+    # 임팩트 전후 3프레임 윈도우 (임팩트 순간 집중)
+    impact_window = range(max(serve_start_frame, impact_frame - 3), impact_frame + 1)
+    for f in impact_window:
         if f not in frames_data:
             continue
         shuttle = det_data[f][0] if (det_data and f in det_data) else None
         racket  = det_data[f][1] if (det_data and f in det_data) else None
         fault   = detect_faults(frames_data[f], side, shuttle, racket, calib)
         if fault["waist_fault"]:  waist_faults.append(f)
+        if fault["shaft_fault"]:  shaft_faults.append(f)
         if fault["waist_margin"] is not None:
             max_waist_m = max(max_waist_m, fault["waist_margin"])
-
-    for f in shaft_window:
-        if f not in frames_data:
-            continue
-        shuttle = det_data[f][0] if (det_data and f in det_data) else None
-        racket  = det_data[f][1] if (det_data and f in det_data) else None
-        fault   = detect_faults(frames_data[f], side, shuttle, racket, calib)
-        if fault["shaft_fault"]:  shaft_faults.append(f)
 
     # ── 서브 시작 시점 판별: 선밟기, 1.15m 높이 ──────────
     line_fault   = False
@@ -464,13 +529,29 @@ def analyze_serve(frames_data, impact_frame, serve_start_frame, side="right",
         frames_data, impact_frame, pre_window, calib, foot_move_px,
         service_line_y=None   # 선밟기는 위에서 별도 처리
     )
-    shake = (detect_shake_fault(wrist_positions, impact_frame, pre_window, shake_reversals)
-             if wrist_positions else False)
+    # 쉐이크: 라켓헤드 감지된 프레임이 있을 때만 판별 (없으면 판별 불가)
+    # 라켓헤드 x좌표 기반으로 감지, 없으면 None (미판별)
+    from math import ceil
+    fps_approx = 60
+    shake_window = max(pre_window, ceil(fps_approx * 2.0))
+    racket_positions = {}
+    if det_data:
+        for f in range(max(0, impact_frame - shake_window), impact_frame + 1):
+            if f in det_data and det_data[f][1]:  # racket detected
+                racket_positions[f] = (det_data[f][1][0], det_data[f][1][1])
+
+    if len(racket_positions) >= 8:
+        # 라켓헤드로 쉐이크 감지
+        shake = detect_shake_fault(racket_positions, impact_frame, shake_window,
+                                   shake_reversals, min_reversal_px=20)
+    else:
+        # 라켓헤드 감지 부족 → 판별 불가 (오탐 방지)
+        shake = None
 
     # ── 헛치기 ────────────────────────────────────────────
     miss = detect_miss(shuttle_positions, impact_frame) if shuttle_positions else None
 
-    n = max(len(list(waist_window)), 1)
+    n = max(len(list(impact_window)), 1)
     return {
         "impact_frame":         impact_frame,
         "serve_start_frame":    serve_start_frame,
@@ -631,7 +712,7 @@ def analyze_video(input_path, output_path=None, side="right",
     if not input_path.exists():
         raise FileNotFoundError(f"파일 없음: {input_path}")
     if output_path is None:
-        output_path = str(input_path.parent / f"{input_path.stem}_result.mp4")
+        output_path = str(input_path.parent / f"{input_path.stem}_result{input_path.suffix}")
 
     pose_model = YOLO("yolov8n-pose.pt")
     det_model  = YOLO(det_model_path) if det_model_path else None
@@ -674,6 +755,7 @@ def analyze_video(input_path, output_path=None, side="right",
         print(f"  서비스라인: {service_line_y}px")
 
     print(f"\n[2/3] 임팩트 + 서브 시작 감지 중...")
+    # 손목 속도로 서브 목록 확보 (안정적)
     impacts, speeds_global = find_impact_frames(wrist_positions, fps, min_gap_sec=2.0)
     print(f"  감지: {len(impacts)}개" + (f" / 예상: {expected_serves}개" if expected_serves else ""))
     if expected_serves and abs(len(impacts) - expected_serves) > 3:
@@ -681,7 +763,10 @@ def analyze_video(input_path, output_path=None, side="right",
 
     serves = []
     for imp in impacts:
-        serve_start = find_serve_start(wrist_positions, speeds_global, imp, fps)
+        # 서브 시작: proximity 기반 정밀화, 폴백 손목 속도
+        serve_start = find_serve_start_proximity(
+            det_data, wrist_positions, speeds_global, imp, fps
+        ) if det_model else find_serve_start(wrist_positions, speeds_global, imp, fps)
         res = analyze_serve(
             frames_data, imp, serve_start, side,
             det_data=det_data if det_model else None,
@@ -760,7 +845,7 @@ def analyze_video(input_path, output_path=None, side="right",
     # 리포트
     fault_serves = [s for s in serves if
                     s["waist_fault"] or s["height_fault"] or s["shaft_fault"] or
-                    s["shake_fault"] or s["foot_move_fault"] or s["foot_line_fault"] or
+                    s["shake_fault"] is True or s["foot_move_fault"] or s["foot_line_fault"] or
                     s.get("miss_fault")]
     report = {
         "input": str(input_path), "fps": fps, "total_frames": total,
@@ -790,7 +875,8 @@ def analyze_video(input_path, output_path=None, side="right",
         if s["waist_fault"]:       tags.append("웨이스트")
         if s["height_fault"]:      tags.append("높이1.15m")
         if s["shaft_fault"]:       tags.append("샤프트")
-        if s["shake_fault"]:       tags.append("쉐이크")
+        if s["shake_fault"] is True:  tags.append("쉐이크")
+        if s["shake_fault"] is None:  tags.append("쉐이크?미감지")
         if s["foot_move_fault"]:   tags.append("발이동")
         if s["foot_line_fault"]:   tags.append("라인밟기")
         if s.get("miss_fault"):    tags.append("헛치기")
