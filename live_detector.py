@@ -301,19 +301,18 @@ def draw_result(frame, result):
     if result.get("shake_fault"):  tags.append("쉐이크")
     if result.get("miss_fault"):   tags.append("헛치기")
 
-    is_fault  = bool(tags)
-    bg_color  = (0, 0, 180) if is_fault else (0, 140, 0)
-    label     = "폴트" if is_fault else "정상"
+    is_fault = bool(tags)
+    if not is_fault:
+        return  # 정상은 표시 안 함
 
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, h//2-80), (w, h//2+80), bg_color, -1)
+    cv2.rectangle(overlay, (0, h//2-80), (w, h//2+80), (0, 0, 180), -1)
     cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
 
-    put_ko(frame, label, (w//2 - 60, h//2 - 55), size=72,
+    put_ko(frame, "폴트", (w//2 - 60, h//2 - 55), size=72,
            color=(255,255,255))
-    if tags:
-        put_ko(frame, " / ".join(tags), (20, h//2 + 30), size=32,
-               color=(220,220,220))
+    put_ko(frame, " / ".join(tags), (20, h//2 + 30), size=32,
+           color=(220,220,220))
 
     sh = result.get("shuttle")
     rk = result.get("racket")
@@ -329,7 +328,7 @@ def draw_hud(frame, calib, shuttle, racket):
     if calib and calib.get("waist_y"):
         wy = int(calib["waist_y"])
         cv2.line(frame, (0,wy), (w,wy), (0,220,220), 2)
-        cv2.putText(frame, "WAIST", (8, wy-6),
+        cv2.putText(frame, "WAIST (↑↓조절)", (8, wy-6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,220,220), 1)
     if calib and calib.get("height_thresh_y"):
         ht = int(calib["height_thresh_y"])
@@ -346,110 +345,110 @@ def draw_hud(frame, calib, shuttle, racket):
 # ── 메인 ────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="배드민턴 서브 폴트 라이브 검출기")
-    parser.add_argument("--source",      default="0",
-                        help="카메라 번호(0,1...) 또는 영상 파일 경로")
-    parser.add_argument("--det_model",   default="best_v9.pt")
-    parser.add_argument("--side",        default="right", choices=["right","left"])
-    parser.add_argument("--result_sec",  type=float, default=3.0,
-                        help="결과 표시 시간(초)")
-    parser.add_argument("--shake_rev",   type=int,   default=2)
-    parser.add_argument("--skip",        type=int,   default=2,
-                        help="N프레임마다 1번 YOLO 처리 (기본 2, 빠르게 하려면 3)")
-    parser.add_argument("--infer_size",  type=int,   default=640,
-                        help="YOLO 추론 해상도 (기본 640, 느리면 320)")
+    parser.add_argument("--source",     default="0")
+    parser.add_argument("--det_model",  default="best_v9.pt")
+    parser.add_argument("--skip",       type=int, default=2)
+    parser.add_argument("--infer_size", type=int, default=640)
     args = parser.parse_args()
 
     src = int(args.source) if args.source.isdigit() else args.source
 
-    pose_model = YOLO("yolov8n-pose.pt")
-    det_model  = YOLO(args.det_model) if Path(args.det_model).exists() else None
-    if det_model:
-        print(f"YOLO 모델: {args.det_model}")
-    else:
-        print("경고: YOLO 모델 없음 — 셔틀콕/라켓 감지 불가")
+    det_model = YOLO(args.det_model) if Path(args.det_model).exists() else None
+    if not det_model:
+        print("경고: 모델 없음"); return
+    print(f"모델: {args.det_model}")
 
-    cap = cv2.VideoCapture(src)
+    backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
+    cap = cv2.VideoCapture(src, backend)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
 
-    detector      = ServeDetector(fps, args.side, shake_reversals=args.shake_rev)
-    result_show   = None
-    frame_idx     = 0
-    result_frames = int(args.result_sec * fps)
-    kps = None; shuttle = None; racket = None  # 이전 프레임 값 유지
+    shuttle      = None
+    frame_idx    = 0
+    calib_locked = False
 
-    print(f"실행 중... (skip={args.skip}, infer_size={args.infer_size}) q 키로 종료")
+    ret0, f0 = cap.read()
+    calib_y = f0.shape[0] // 2 if ret0 else 360
+    thresh_y = None
+
+    win_name = "서브폴트 — 마우스클릭:선이동  Enter:확정  r:재설정  q:종료"
+    cv2.namedWindow(win_name)
+
+    def on_mouse(event, x, y, flags, param):
+        nonlocal calib_y, thresh_y
+        if event == cv2.EVENT_LBUTTONDOWN or (flags & cv2.EVENT_FLAG_LBUTTON):
+            calib_y = y
+            if calib_locked:
+                thresh_y = float(y)
+
+    cv2.setMouseCallback(win_name, on_mouse)
+    print("마우스 클릭으로 선 위치 조절 → Enter 로 1.15m 확정  |  r 재설정  |  q 종료")
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            break
+            cv2.waitKey(30)
+            continue
 
-        # ── N프레임마다 YOLO 처리 (나머지는 이전 값 재사용) ──
+        h, w = frame.shape[:2]
+
+        # ── 셔틀콕 감지 ──────────────────────────────────────
         if frame_idx % args.skip == 0:
-            h, w = frame.shape[:2]
             scale = args.infer_size / max(h, w)
             small = cv2.resize(frame, (int(w*scale), int(h*scale)))
+            res   = det_model(small, verbose=False)
+            shuttle = None
+            if res[0].boxes is not None:
+                for box in res[0].boxes:
+                    if float(box.conf[0]) < 0.25:
+                        continue
+                    x1,y1,x2,y2 = [float(v)/scale for v in box.xyxy[0]]
+                    cx, cy = (x1+x2)/2, (y1+y2)/2
+                    conf = float(box.conf[0])
+                    if shuttle is None or conf > shuttle[2]:
+                        shuttle = (cx, cy, conf)
 
-            pose_res = pose_model(small, verbose=False)
-            kps = None
-            if pose_res[0].keypoints is not None and len(pose_res[0].keypoints) > 0:
-                kps_small = pose_res[0].keypoints.data[0].cpu().numpy()
-                # 좌표를 원본 해상도로 복원
-                kps = kps_small.copy()
-                kps[:, 0] /= scale
-                kps[:, 1] /= scale
+        # ── 기준선 그리기 ─────────────────────────────────────
+        line_y = int(thresh_y if calib_locked else calib_y)
+        if calib_locked:
+            # 확정된 기준선 — 주황색
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 140, 255), 2)
+            cv2.putText(frame, "1.15m", (8, line_y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 140, 255), 2)
+        else:
+            # 조절 중 기준선 — 노란색 점선 느낌
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 220, 255), 2)
+            put_ko(frame, "↑↓ 로 선 이동  →  Enter 로 1.15m 확정",
+                   (10, line_y - 30), size=26, color=(0, 220, 255))
 
-            shuttle = racket = None
-            if det_model and kps is not None:
-                det_res = det_model(small, verbose=False)
-                if det_res[0].boxes is not None:
-                    for box in det_res[0].boxes:
-                        cls  = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        if conf < 0.3: continue
-                        x1,y1,x2,y2 = [float(v)/scale for v in box.xyxy[0]]
-                        cx,cy = (x1+x2)/2, (y1+y2)/2
-                        if cls == SHUTTLE_CLS and (shuttle is None or conf > shuttle[2]):
-                            shuttle = (cx,cy,conf,x1,y1,x2,y2)
-                        elif cls == RACKET_CLS and (racket is None or conf > racket[2]):
-                            racket  = (cx,cy,conf,x1,y1,x2,y2)
+        # ── 셔틀콕 원 그리기 ──────────────────────────────────
+        if shuttle:
+            cx, cy = int(shuttle[0]), int(shuttle[1])
+            if not calib_locked:
+                color = (200, 200, 200)  # 캘리브레이션 전 — 회색
+            elif cy < thresh_y:
+                color = (0, 0, 255)      # 빨강 — 1.15m 초과 (폴트)
+            else:
+                color = (0, 255, 0)      # 초록 — 정상
+            cv2.circle(frame, (cx, cy), 18, color, 3)
 
-        # 스켈레톤 그리기
-        if kps is not None:
-            for i, j in SKELETON:
-                xi,yi,ci = kps[i]; xj,yj,cj = kps[j]
-                if ci >= CONF_THR and cj >= CONF_THR:
-                    cv2.line(frame,(int(xi),int(yi)),(int(xj),int(yj)),(0,255,128),2)
-            for idx in range(len(kps)):
-                x,y,c = kps[idx]
-                if c >= CONF_THR:
-                    cv2.circle(frame,(int(x),int(y)),4,(0,200,255),-1)
+        cv2.imshow(win_name, frame)
+        key = cv2.waitKey(1) & 0xFF
 
-        if kps is not None:
-            detector.push(frame_idx, kps, shuttle, racket)
-
-        # ── 임팩트 감지 ─────────────────────────────────────
-        result = detector.check_impact(frame_idx)
-        if result:
-            result_show = (result, frame_idx + result_frames)
-
-        # ── 결과 만료 체크 ───────────────────────────────────
-        if result_show and frame_idx > result_show[1]:
-            result_show = None
-
-        # ── HUD 및 결과 표시 ─────────────────────────────────
-        draw_hud(frame, detector.calib, shuttle, racket)
-        if result_show:
-            draw_result(frame, result_show[0])
-
-        cv2.putText(frame, f"f={frame_idx}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (160,160,160), 1)
-
-        cv2.imshow("배드민턴 서브 폴트 검출기 — q: 종료", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if key == ord('q'):
             break
+        elif key == ord('f'):  # 전체화면 토글
+            fs = cv2.getWindowProperty(win_name, cv2.WND_PROP_FULLSCREEN)
+            cv2.setWindowProperty(win_name, cv2.WND_PROP_FULLSCREEN,
+                                  cv2.WINDOW_FULLSCREEN if fs != cv2.WINDOW_FULLSCREEN else cv2.WINDOW_NORMAL)
+        elif key == 13:   # Enter
+            thresh_y    = float(calib_y)
+            calib_locked = True
+            print(f"1.15m 기준 확정: y={thresh_y:.0f}")
+        elif key == ord('r'):
+            calib_locked = False
+            thresh_y     = None
+            print("기준선 재설정")
 
         frame_idx += 1
 
