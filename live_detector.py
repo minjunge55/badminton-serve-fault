@@ -372,7 +372,7 @@ def main():
 
     def beep():
         if platform.system() == "Darwin":
-            subprocess.Popen(["afplay", "/System/Library/Sounds/Sosumi.aiff"])
+            subprocess.Popen(["say", "-v", "Flo (영어(미국))", "fault"])
         else:
             print("\a", end="", flush=True)
 
