@@ -366,11 +366,11 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
     shuttle          = None
-    prev_shuttle     = None   # 이전 프레임 셔틀 위치 (속도 계산용)
     frame_idx        = 0
     calib_locked     = False
-    last_beep_frame  = -999  # 소리 쿨다운용
-    SPEED_THRESH     = 25    # 이 픽셀/프레임 이상이면 "움직이는 중" — 소리 안냄
+    last_beep_frame  = -999
+    shuttle_history  = deque(maxlen=10)  # 최근 10프레임 위치 기록
+    MOVE_THRESH      = 60   # 최근 10프레임 동안 이 픽셀 이상 움직이면 "이동 중"
 
     def beep():
         if platform.system() == "Darwin":
@@ -432,22 +432,21 @@ def main():
             put_ko(frame, "↑↓ 로 선 이동  →  Enter 로 1.15m 확정",
                    (10, line_y - 30), size=26, color=(0, 220, 255))
 
-        # ── 셔틀콕 속도 계산 ─────────────────────────────────────
-        shuttle_speed = 0.0
-        if shuttle and prev_shuttle:
-            dx = shuttle[0] - prev_shuttle[0]
-            dy = shuttle[1] - prev_shuttle[1]
-            shuttle_speed = (dx**2 + dy**2) ** 0.5
+        # ── 셔틀콕 이동 거리 계산 (최근 10프레임) ───────────────
         if shuttle:
-            prev_shuttle = shuttle
+            shuttle_history.append((shuttle[0], shuttle[1]))
+        total_move = 0.0
+        if len(shuttle_history) >= 4:
+            xs = [p[0] for p in shuttle_history]
+            ys = [p[1] for p in shuttle_history]
+            total_move = ((max(xs)-min(xs))**2 + (max(ys)-min(ys))**2) ** 0.5
+        is_moving = total_move > MOVE_THRESH
 
         # ── 셔틀콕 원 그리기 + 폴트 소리 ────────────────────────
         if shuttle:
             cx, cy = int(shuttle[0]), int(shuttle[1])
-            is_moving = shuttle_speed > SPEED_THRESH
             if not calib_locked or is_moving:
-                # 기준선 미확정 or 움직이는 중 → 회색(판정 없음)
-                color = (180, 180, 180)
+                color = (180, 180, 180)  # 회색 — 판정 없음
             elif cy < thresh_y:
                 color = (0, 0, 255)      # 빨강 — 폴트
                 if frame_idx - last_beep_frame > 60:
@@ -457,7 +456,7 @@ def main():
                 color = (0, 255, 0)      # 초록 — 정상
             cv2.circle(frame, (cx, cy), 18, color, 3)
             if calib_locked:
-                cv2.putText(frame, f"{'moving' if is_moving else 'hold'} {shuttle_speed:.0f}px",
+                cv2.putText(frame, f"{'moving' if is_moving else 'hold'} {total_move:.0f}px",
                             (cx + 22, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
         cv2.imshow(win_name, frame)
