@@ -10,6 +10,8 @@
 import cv2
 import argparse
 import numpy as np
+import subprocess
+import threading
 from collections import deque
 from pathlib import Path
 from ultralytics import YOLO
@@ -363,9 +365,16 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-    shuttle      = None
-    frame_idx    = 0
-    calib_locked = False
+    shuttle          = None
+    frame_idx        = 0
+    calib_locked     = False
+    last_beep_frame  = -999  # 소리 쿨다운용
+
+    def beep():
+        if platform.system() == "Darwin":
+            subprocess.Popen(["afplay", "/System/Library/Sounds/Sosumi.aiff"])
+        else:
+            print("\a", end="", flush=True)
 
     ret0, f0 = cap.read()
     calib_y = f0.shape[0] // 2 if ret0 else 360
@@ -421,13 +430,16 @@ def main():
             put_ko(frame, "↑↓ 로 선 이동  →  Enter 로 1.15m 확정",
                    (10, line_y - 30), size=26, color=(0, 220, 255))
 
-        # ── 셔틀콕 원 그리기 ──────────────────────────────────
+        # ── 셔틀콕 원 그리기 + 폴트 소리 ────────────────────────
         if shuttle:
             cx, cy = int(shuttle[0]), int(shuttle[1])
             if not calib_locked:
-                color = (200, 200, 200)  # 캘리브레이션 전 — 회색
+                color = (200, 200, 200)
             elif cy < thresh_y:
-                color = (0, 0, 255)      # 빨강 — 1.15m 초과 (폴트)
+                color = (0, 0, 255)      # 빨강 — 폴트
+                if frame_idx - last_beep_frame > 60:  # 약 2초 쿨다운
+                    threading.Thread(target=beep, daemon=True).start()
+                    last_beep_frame = frame_idx
             else:
                 color = (0, 255, 0)      # 초록 — 정상
             cv2.circle(frame, (cx, cy), 18, color, 3)
