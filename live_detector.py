@@ -445,17 +445,17 @@ def main():
         if shuttle:
             cx, cy = int(shuttle[0]), int(shuttle[1])
             is_moving = shuttle_speed > SPEED_THRESH
-            if not calib_locked:
-                color = (200, 200, 200)
+            if not calib_locked or is_moving:
+                # 기준선 미확정 or 움직이는 중 → 회색(판정 없음)
+                color = (180, 180, 180)
             elif cy < thresh_y:
                 color = (0, 0, 255)      # 빨강 — 폴트
-                if not is_moving and frame_idx - last_beep_frame > 60:
+                if frame_idx - last_beep_frame > 60:
                     threading.Thread(target=beep, daemon=True).start()
                     last_beep_frame = frame_idx
             else:
                 color = (0, 255, 0)      # 초록 — 정상
             cv2.circle(frame, (cx, cy), 18, color, 3)
-            # 움직임 상태 표시
             if calib_locked:
                 cv2.putText(frame, f"{'moving' if is_moving else 'hold'} {shuttle_speed:.0f}px",
                             (cx + 22, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
