@@ -349,8 +349,8 @@ def main():
     parser = argparse.ArgumentParser(description="배드민턴 서브 폴트 라이브 검출기")
     parser.add_argument("--source",     default="0")
     parser.add_argument("--det_model",  default="best_v9.pt")
-    parser.add_argument("--skip",       type=int, default=2)
-    parser.add_argument("--infer_size", type=int, default=640)
+    parser.add_argument("--skip",       type=int, default=1)
+    parser.add_argument("--infer_size", type=int, default=320)
     args = parser.parse_args()
 
     src = int(args.source) if args.source.isdigit() else args.source
@@ -387,7 +387,11 @@ def main():
 
     def on_mouse(event, x, y, flags, param):
         nonlocal calib_y, thresh_y
-        if event == cv2.EVENT_LBUTTONDOWN or (flags & cv2.EVENT_FLAG_LBUTTON):
+        if event in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_MOUSEMOVE) and (flags & cv2.EVENT_FLAG_LBUTTON):
+            calib_y = y
+            if calib_locked:
+                thresh_y = float(y)
+        elif event == cv2.EVENT_LBUTTONDOWN:
             calib_y = y
             if calib_locked:
                 thresh_y = float(y)
@@ -422,15 +426,16 @@ def main():
         # ── 기준선 그리기 ─────────────────────────────────────
         line_y = int(thresh_y if calib_locked else calib_y)
         if calib_locked:
-            # 확정된 기준선 — 주황색
-            cv2.line(frame, (0, line_y), (w, line_y), (0, 140, 255), 2)
-            cv2.putText(frame, "1.15m", (8, line_y - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 140, 255), 2)
+            # 확정된 기준선 — 주황색 굵게
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 120, 255), 4)
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 200, 255), 2)
+            cv2.putText(frame, "1.15m", (8, line_y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 200, 255), 3)
         else:
-            # 조절 중 기준선 — 노란색 점선 느낌
-            cv2.line(frame, (0, line_y), (w, line_y), (0, 220, 255), 2)
-            put_ko(frame, "↑↓ 로 선 이동  →  Enter 로 1.15m 확정",
-                   (10, line_y - 30), size=26, color=(0, 220, 255))
+            # 조절 중 기준선 — 노란색 굵게
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 220, 255), 4)
+            put_ko(frame, "클릭/드래그로 선 이동  →  Enter 로 확정",
+                   (10, line_y - 35), size=28, color=(0, 220, 255))
 
         # ── 셔틀콕 이동 거리 계산 (최근 10프레임) ───────────────
         if shuttle:
